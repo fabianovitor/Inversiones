@@ -8,7 +8,7 @@ st.set_page_config(page_title="Estrategia de Jubilación Pro", layout="wide")
 
 # --- CONFIGURACIÓN DE CONEXIÓN ---
 # Reemplaza con tu ID de Google Sheet (Asegúrate de que esté 'Publicado en la Web' como CSV)
-SHEET_ID = 'TU_ID_DE_HOJA_AQUI' 
+SHEET_ID = '1zgByQdqcNFUzXJmwbHu8TxxiLMzcD2CawB_ZEGOathU' 
 SHEET_NAME = 'Hoja1'
 URL = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={SHEET_NAME}'
 
