@@ -1,211 +1,224 @@
 # ============================================================
-# market_data.py - Busca de cotações e dividendos via yfinance
+# market_data.py - Dados de mercado via yfinance
 # ============================================================
 
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from config import CACHE_TTL_COTACOES, CACHE_TTL_DIVIDENDOS
+
+from config import CACHE_TTL_MERCADO
+from utils import safe_float, safe_div
 
 
 # ============================================================
-# BUSCAR COTAÇÕES ATUAIS
+# FUNÇÃO PRINCIPAL
 # ============================================================
 
-@st.cache_data(ttl=CACHE_TTL_COTACOES, show_spinner=False)
-def buscar_cotacao(ticker):
-    """Busca cotação atual de um ticker.
+@st.cache_data(ttl=CACHE_TTL_MERCADO, show_spinner=False)
+def enriquecer_ativo(ticker: str) -> dict:
+    """Busca dados de mercado de um ticker via yfinance.
     
     Args:
-        ticker: símbolo da ação (ex: 'AAPL', 'ERIC')
+        ticker: Símbolo do ativo (ex: "AAPL", "ERIC")
     
     Returns:
-        dict com: preco_atual, variacao_pct, moeda
-        ou None se falhar
-    """
-    try:
-        t = yf.Ticker(ticker)
-        info = t.info
-        
-        # Tenta diferentes campos para preço atual
-        preco = (
-            info.get("currentPrice")
-            or info.get("regularMarketPrice")
-            or info.get("previousClose")
-        )
-        
-        if preco is None:
-            # Fallback: pega último fechamento do histórico
-            hist = t.history(period="5d")
-            if not hist.empty:
-                preco = float(hist["Close"].iloc[-1])
-        
-        if preco is None:
-            return None
-        
-        # Calcula variação percentual
-        prev_close = info.get("previousClose")
-        variacao_pct = None
-        if prev_close and preco:
-            variacao_pct = ((preco - prev_close) / prev_close) * 100
-        
-        return {
-            "preco_atual": float(preco),
-            "variacao_pct": variacao_pct,
-            "moeda": info.get("currency", "USD"),
-            "nome_curto": info.get("shortName", ticker),
-            "setor": info.get("sector", ""),
+        Dicionário com dados de mercado:
+        {
+            "preco_atual"  : float,
+            "variacao_pct" : float,
+            "div_yield"    : float,
+            "div_anual"    : float,
+            "setor"        : str,
+            "nome"         : str,
+            "moeda"        : str,
+            "market_cap"   : float,
+            "pe_ratio"     : float,
+            "beta"         : float,
         }
-    except Exception as e:
-        print(f"[ERRO] Falha ao buscar {ticker}: {e}")
-        return None
-
-
-@st.cache_data(ttl=CACHE_TTL_COTACOES, show_spinner=False)
-def buscar_cotacoes_lote(tickers):
-    """Busca cotações de múltiplos tickers em lote (mais rápido).
-    
-    Args:
-        tickers: lista de símbolos
-    
-    Returns:
-        dict {ticker: {preco_atual, variacao_pct, ...}}
     """
-    resultado = {}
-    for ticker in tickers:
-        if not ticker or pd.isna(ticker):
-            continue
-        cotacao = buscar_cotacao(ticker)
-        if cotacao:
-            resultado[ticker] = cotacao
-    return resultado
-
-
-# ============================================================
-# BUSCAR DIVIDENDOS / DIVIDEND YIELD
-# ============================================================
-
-@st.cache_data(ttl=CACHE_TTL_DIVIDENDOS, show_spinner=False)
-def buscar_dividend_yield(ticker):
-    """Busca o Dividend Yield atual de um ticker.
-    
-    Args:
-        ticker: símbolo da ação
-    
-    Returns:
-        float: DY em formato decimal (0.05 = 5%) ou None
-    """
-    try:
-        t = yf.Ticker(ticker)
-        info = t.info
-        
-        # Tenta diferentes campos
-        dy = (
-            info.get("dividendYield")
-            or info.get("trailingAnnualDividendYield")
-        )
-        
-        if dy is None:
-            return None
-        
-        dy = float(dy)
-        
-        # yfinance às vezes retorna em % (5.0) e às vezes em decimal (0.05)
-        # Normaliza para decimal
-        if dy > 1:
-            dy = dy / 100
-        
-        return dy
-    except Exception as e:
-        print(f"[ERRO] Falha ao buscar DY de {ticker}: {e}")
-        return None
-
-
-@st.cache_data(ttl=CACHE_TTL_DIVIDENDOS, show_spinner=False)
-def buscar_dividendos_anuais(ticker):
-    """Busca o total de dividendos pagos nos últimos 12 meses.
-    
-    Args:
-        ticker: símbolo da ação
-    
-    Returns:
-        float: dividendos por ação nos últimos 12 meses (USD) ou None
-    """
-    try:
-        t = yf.Ticker(ticker)
-        divs = t.dividends
-        
-        if divs.empty:
-            return None
-        
-        # Pega últimos 12 meses
-        um_ano_atras = pd.Timestamp.now(tz=divs.index.tz) - pd.DateOffset(years=1)
-        divs_recentes = divs[divs.index >= um_ano_atras]
-        
-        if divs_recentes.empty:
-            return None
-        
-        return float(divs_recentes.sum())
-    except Exception as e:
-        print(f"[ERRO] Falha ao buscar dividendos de {ticker}: {e}")
-        return None
-
-
-# ============================================================
-# FUNÇÃO COMPLETA: ENRIQUECER DADOS DA CARTEIRA
-# ============================================================
-
-def enriquecer_ativo(ticker):
-    """Busca todos os dados de mercado de um ativo.
-    
-    Args:
-        ticker: símbolo da ação
-    
-    Returns:
-        dict com: preco_atual, variacao_pct, div_yield, div_anual, setor
-    """
-    cotacao = buscar_cotacao(ticker)
-    dy = buscar_dividend_yield(ticker)
-    div_anual = buscar_dividendos_anuais(ticker)
-    
-    if cotacao is None:
-        return {
-            "preco_atual": None,
-            "variacao_pct": None,
-            "div_yield": dy,
-            "div_anual": div_anual,
-            "moeda": "USD",
-            "nome_curto": ticker,
-            "setor": "",
-        }
-    
-    return {
-        "preco_atual": cotacao["preco_atual"],
-        "variacao_pct": cotacao["variacao_pct"],
-        "div_yield": dy,
-        "div_anual": div_anual,
-        "moeda": cotacao["moeda"],
-        "nome_curto": cotacao["nome_curto"],
-        "setor": cotacao["setor"],
+    resultado_vazio = {
+        "preco_atual"  : 0.0,
+        "variacao_pct" : 0.0,
+        "div_yield"    : 0.0,
+        "div_anual"    : 0.0,
+        "setor"        : "",
+        "nome"         : ticker,
+        "moeda"        : "USD",
+        "market_cap"   : 0.0,
+        "pe_ratio"     : 0.0,
+        "beta"         : 0.0,
     }
 
+    if not ticker or ticker.strip() == "":
+        return resultado_vazio
+
+    try:
+        ativo = yf.Ticker(ticker.strip().upper())
+        info  = ativo.info or {}
+
+        # --- Preço atual ---
+        preco = (
+            safe_float(info.get("currentPrice"))
+            or safe_float(info.get("regularMarketPrice"))
+            or safe_float(info.get("previousClose"))
+            or 0.0
+        )
+
+        # --- Variação do dia ---
+        preco_abertura = safe_float(info.get("open") or info.get("regularMarketOpen"))
+        if preco > 0 and preco_abertura > 0:
+            variacao = safe_div(preco - preco_abertura, preco_abertura) * 100
+        else:
+            variacao = safe_float(
+                info.get("regularMarketChangePercent")
+            )
+
+        # --- Dividendos ---
+        div_yield = safe_float(info.get("dividendYield"))     # ex: 0.0523
+        div_anual = safe_float(info.get("trailingAnnualDividendRate"))  # por ação
+
+        # Fallback: calcular div_anual a partir do yield e preço
+        if div_anual == 0.0 and div_yield > 0 and preco > 0:
+            div_anual = div_yield * preco
+
+        # --- Informações gerais ---
+        setor = (
+            info.get("sector")
+            or info.get("category")
+            or info.get("fundFamily")
+            or ""
+        )
+        nome       = info.get("shortName") or info.get("longName") or ticker
+        moeda      = info.get("currency") or "USD"
+        market_cap = safe_float(info.get("marketCap"))
+        pe_ratio   = safe_float(info.get("trailingPE") or info.get("forwardPE"))
+        beta       = safe_float(info.get("beta"))
+
+        return {
+            "preco_atual"  : preco,
+            "variacao_pct" : variacao,
+            "div_yield"    : div_yield,
+            "div_anual"    : div_anual,
+            "setor"        : setor,
+            "nome"         : nome,
+            "moeda"        : moeda,
+            "market_cap"   : market_cap,
+            "pe_ratio"     : pe_ratio,
+            "beta"         : beta,
+        }
+
+    except Exception:
+        return resultado_vazio
+
 
 # ============================================================
-# FUNÇÃO DE TESTE (rodar manualmente para verificar)
+# HISTÓRICO DE PREÇOS
 # ============================================================
 
-def testar_conexao():
-    """Testa se yfinance está funcionando.
+@st.cache_data(ttl=CACHE_TTL_MERCADO, show_spinner=False)
+def historico_precos(ticker: str,
+                     periodo: str = "1y",
+                     intervalo: str = "1d") -> pd.DataFrame:
+    """Busca histórico de preços de um ticker.
+    
+    Args:
+        ticker   : Símbolo do ativo
+        periodo  : "1mo", "3mo", "6mo", "1y", "2y", "5y"
+        intervalo: "1d", "1wk", "1mo"
     
     Returns:
-        bool: True se OK, False se falhou
+        DataFrame com colunas: Date, Open, High, Low, Close, Volume
     """
     try:
-        dados = buscar_cotacao("AAPL")
-        if dados and dados.get("preco_atual"):
-            print(f"✅ yfinance OK - AAPL: ${dados['preco_atual']:.2f}")
-            return True
-        return False
-    except Exception as e:
-        print(f"❌ yfinance falhou: {e}")
+        ativo = yf.Ticker(ticker.strip().upper())
+        df = ativo.history(period=periodo, interval=intervalo)
+
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        df = df.reset_index()
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
+
+    except Exception:
+        return pd.DataFrame()
+
+
+# ============================================================
+# MÚLTIPLOS TICKERS DE UMA VEZ
+# ============================================================
+
+@st.cache_data(ttl=CACHE_TTL_MERCADO, show_spinner=False)
+def precos_em_lote(tickers: list) -> dict:
+    """Busca preço atual de vários tickers de uma vez.
+    
+    Mais eficiente que chamar enriquecer_ativo() em loop
+    quando só precisa do preço.
+    
+    Args:
+        tickers: Lista de tickers (ex: ["AAPL", "MSFT", "ERIC"])
+    
+    Returns:
+        Dicionário {ticker: preco_atual}
+    """
+    resultado = {t: 0.0 for t in tickers}
+
+    if not tickers:
+        return resultado
+
+    try:
+        tickers_str = " ".join([t.strip().upper() for t in tickers])
+        dados = yf.download(
+            tickers_str,
+            period="2d",
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+        )
+
+        if dados.empty:
+            return resultado
+
+        # Extrai último preço de fechamento
+        if isinstance(dados.columns, pd.MultiIndex):
+            # Múltiplos tickers
+            close = dados["Close"]
+            for ticker in tickers:
+                t = ticker.strip().upper()
+                if t in close.columns:
+                    ultimo = close[t].dropna()
+                    if not ultimo.empty:
+                        resultado[ticker] = safe_float(ultimo.iloc[-1])
+        else:
+            # Ticker único
+            if len(tickers) == 1:
+                ultimo = dados["Close"].dropna()
+                if not ultimo.empty:
+                    resultado[tickers[0]] = safe_float(ultimo.iloc[-1])
+
+        return resultado
+
+    except Exception:
+        return resultado
+
+
+# ============================================================
+# VALIDAÇÃO DE TICKER
+# ============================================================
+
+@st.cache_data(ttl=600, show_spinner=False)
+def ticker_valido(ticker: str) -> bool:
+    """Verifica se um ticker existe no yfinance.
+    
+    Args:
+        ticker: Símbolo a verificar
+    
+    Returns:
+        True se válido, False se não encontrado
+    """
+    try:
+        ativo = yf.Ticker(ticker.strip().upper())
+        info = ativo.info
+        return bool(info and info.get("symbol"))
+    except Exception:
         return False
