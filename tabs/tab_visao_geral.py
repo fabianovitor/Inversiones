@@ -68,10 +68,4 @@ def renderizar(df_principal: pd.DataFrame,
             st.info("Sem dados Ericsson")
 
     st.divider()
-    st.markdown("### 💱 Em Reais (BRL)")
-    st.caption(f"Câmbio: R$ {BRL_USD:.2f} por USD")
-
-    b1, b2, b3 = st.columns(3)
-    b1.metric("Patrimônio BRL", f"R$ {patrimonio_total * BRL_USD:,.2f}")
-    b2.metric("Renda Mensal BRL", f"R$ {renda_mensal * BRL_USD:,.2f}")
-    b3.metric("Renda Anual BRL", f"R$ {renda_mensal * 12 * BRL_USD:,.2f}")
+   
