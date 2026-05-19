@@ -156,43 +156,29 @@ def render_sidebar(df_principal: pd.DataFrame,
 # TABS PRINCIPAIS
 # ============================================================
 
+from tabs import tab_carteira, tab_ericsson, tab_projecao, tab_analises
+
 def render_tabs(df_principal: pd.DataFrame,
                 df_ericsson: pd.DataFrame) -> None:
-    """Renderiza as tabs do dashboard."""
 
     tabs = st.tabs([
-        "📊 Visão Geral",
-        "📈 Performance",
-        "💰 Dividendos",
-        "🎯 Alocação",
+        "📊 Carteira",
         "🔵 Ericsson",
-        "🔍 Detalhes",
+        "🎯 Projeção",
+        "🔍 Análises",
     ])
 
-    # --- Tab 1: Visão Geral ---
     with tabs[0]:
-        _render_visao_geral(df_principal, df_ericsson)
+        tab_carteira.renderizar(df_principal)
 
-    # --- Tab 2: Performance ---
     with tabs[1]:
-        _render_performance(df_principal)
+        tab_ericsson.renderizar(df_ericsson)
 
-    # --- Tab 3: Dividendos ---
     with tabs[2]:
-        _render_dividendos(df_principal)
+        tab_projecao.renderizar(df_principal, df_ericsson)
 
-    # --- Tab 4: Alocação ---
     with tabs[3]:
-        _render_alocacao(df_principal)
-
-    # --- Tab 5: Ericsson ---
-    with tabs[4]:
-        _render_ericsson(df_ericsson)
-
-    # --- Tab 6: Detalhes ---
-    with tabs[5]:
-        _render_detalhes(df_principal, df_ericsson)
-
+        tab_analises.renderizar(df_principal, df_ericsson)
 
 # ============================================================
 # TAB 1: VISÃO GERAL
