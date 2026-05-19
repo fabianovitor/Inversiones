@@ -1,88 +1,98 @@
 # ============================================================
-# config.py - Configurações, constantes e tooltips
+# config.py - Configurações centrais do dashboard
 # ============================================================
 
-# ----- Caminho da planilha -----
-PLANILHA_PATH = "carteira.xlsx"
+# ============================================================
+# FONTE DE DADOS (troque aqui no futuro)
+# ============================================================
+# Opções disponíveis:
+#   "google_sheets"  -> Planilha Google Sheets (ATUAL)
+#   "ibkr_flex"      -> IBKR Flex Query (FUTURO v2.0)
+#   "ibkr_api"       -> IBKR TWS API (FUTURO v3.0)
+#   "excel_local"    -> Arquivo Excel local (BACKUP)
 
-# ----- Configurações financeiras padrão -----
-META_MENSAL_DEFAULT = 5000.0      # Meta de renda mensal em USD
-APORTE_MENSAL_DEFAULT = 1000.0    # Aporte mensal em USD
-TAXA_RETORNO_DEFAULT = 0.10       # 10% ao ano (retorno esperado)
-TAXA_SAQUE_DEFAULT = 0.04         # 4% ao ano (regra dos 4%)
-ANOS_PROJECAO_DEFAULT = 17        # 48 → 65 anos
+DATA_SOURCE = "google_sheets"
 
-# ----- Configurações do Streamlit -----
-PAGE_CONFIG = {
-    "page_title": "Dashboard Aposentadoria",
-    "page_icon": "💰",
-    "layout": "wide",
-    "initial_sidebar_state": "expanded",
+# ============================================================
+# CONFIGURAÇÕES: GOOGLE SHEETS
+# ============================================================
+GOOGLE_SHEETS_ID  = "1zgByQdqcNFUzXJmwbHu8TxxiLMzcD2CawB_ZEGOathU"
+GOOGLE_SHEETS_GID = "79928919"
+GOOGLE_SHEETS_URL = (
+    f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_ID}"
+    f"/export?format=csv&gid={GOOGLE_SHEETS_GID}"
+)
+
+# ============================================================
+# CONFIGURAÇÕES: IBKR FLEX QUERY (FUTURO - deixe vazio por ora)
+# ============================================================
+IBKR_FLEX_TOKEN   = ""   # Seu token Flex Query
+IBKR_FLEX_QUERY_ID = ""  # ID da query configurada no IBKR
+
+# ============================================================
+# CONFIGURAÇÕES: IBKR TWS API (FUTURO - deixe vazio por ora)
+# ============================================================
+IBKR_TWS_HOST = "127.0.0.1"
+IBKR_TWS_PORT = 7497
+IBKR_TWS_CLIENT_ID = 1
+
+# ============================================================
+# MAPEAMENTO DE COLUNAS: Google Sheets -> padrão dashboard
+# ============================================================
+MAPEAMENTO_COLUNAS_GS = {
+    "ticker"        : "ticker",
+    "empresa"       : "nome",
+    "categoría"     : "categoria",
+    "categoria"     : "categoria",
+    "objetivo %"    : "objetivo_pct",
+    "cantidad"      : "qtd",
+    "precio medio"  : "pm_usd",
+    "dividendos ttm": "div_anual",
+    "yield on cost" : "yoc_planilha",
+    "precio actual" : "preco_atual_planilha",
+    "valor total"   : "valor_total_planilha",
+    "% actual"      : "peso_planilha",
+    "diferencia"    : "diferenca",
+    "accion"        : "acao",
+    "valor"         : "valor_acao",
 }
 
-# ----- Cache (em segundos) -----
-CACHE_TTL_COTACOES = 300          # 5 minutos
-CACHE_TTL_DIVIDENDOS = 3600       # 1 hora
+# ============================================================
+# IDENTIFICAÇÃO DE CARTEIRAS
+# ============================================================
+TICKER_ERICSSON = "ERIC"   # Ticker que identifica carteira Ericsson
 
-# ----- Limites de rebalanceamento -----
-LIMITE_ERICSSON_PCT = 0.25        # 25% da carteira principal
+# ============================================================
+# CONFIGURAÇÕES DE CACHE
+# ============================================================
+CACHE_TTL_PLANILHA  = 300   # 5 minutos (Google Sheets)
+CACHE_TTL_MERCADO   = 180   # 3 minutos (Yahoo Finance)
 
-# ----- Tooltips (textos de ajuda) -----
-TOOLTIPS = {
-    "patrimonio": (
-        "Soma do valor atual (preço × quantidade) de todos os ativos "
-        "da carteira principal, excluindo a Ericsson."
-    ),
-    "renda_mensal": (
-        "Estimativa de renda mensal baseada no Dividend Yield (DY) "
-        "atual de cada ativo, dividido por 12 meses."
-    ),
-    "ericsson": (
-        "Carteira paralela com ações da Ericsson adquiridas via plano "
-        "de compra da empresa. Tratada separadamente."
-    ),
-    "meta": (
-        "Meta de renda mensal passiva (em USD) que você deseja atingir "
-        "para se aposentar com tranquilidade."
-    ),
-    "aporte": (
-        "Valor que você consegue investir todo mês na carteira."
-    ),
-    "taxa_retorno": (
-        "Retorno anual médio esperado da carteira (juros compostos), "
-        "considerando dividendos reinvestidos."
-    ),
-    "taxa_saque": (
-        "Percentual anual seguro para retirada na aposentadoria. "
-        "A 'regra dos 4%' é o padrão consagrado."
-    ),
-    "dy": (
-        "Dividend Yield: percentual que o ativo paga em dividendos "
-        "ao ano, em relação ao preço atual."
-    ),
-    "yoc": (
-        "Yield on Cost: dividendos pagos em relação ao seu preço "
-        "médio de compra (não ao preço atual). Mostra a rentabilidade "
-        "real do seu investimento."
-    ),
-}
+# ============================================================
+# MOEDA E FORMATAÇÃO
+# ============================================================
+MOEDA_SIMBOLO = "USD"
+MOEDA_LOCALE  = "en_US"
 
-# ----- Cores para gráficos -----
+# ============================================================
+# CORES DO DASHBOARD
+# ============================================================
 CORES = {
-    "lucro": "#00C853",
-    "prejuizo": "#D50000",
-    "neutro": "#9E9E9E",
-    "primaria": "#1f77b4",
-    "ericsson": "#FF6B35",
-    "meta": "#FFC107",
+    "positivo"  : "#00C853",
+    "negativo"  : "#FF1744",
+    "neutro"    : "#9E9E9E",
+    "primario"  : "#1565C0",
+    "secundario": "#FFA000",
+    "fundo"     : "#0E1117",
 }
 
-# ----- Colunas esperadas na planilha -----
-COLUNAS_PLANILHA = [
-    "ticker",       # Ex: AAPL, MSFT, ERIC
-    "nome",         # Nome da empresa
-    "tipo",         # 'principal' ou 'ericsson'
-    "setor",        # Setor da empresa (Tech, Health, etc.)
-    "qtd",          # Quantidade de ações
-    "pm_usd",       # Preço médio em USD
-]
+# ============================================================
+# TOOLTIPS
+# ============================================================
+TOOLTIPS = {
+    "patrimonio"   : "Valor total da carteira a preço atual de mercado.",
+    "renda_mensal" : "Estimativa de dividendos mensais (Dividendos TTM ÷ 12).",
+    "dy"           : "Dividend Yield: dividendos anuais ÷ preço atual.",
+    "yoc"          : "Yield on Cost: dividendos anuais ÷ preço médio de compra.",
+    "lucro"        : "Diferença entre valor atual e custo total investido.",
+}
