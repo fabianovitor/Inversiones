@@ -12,7 +12,11 @@
 #   "excel_local"    -> Arquivo Excel local (BACKUP)
 
 DATA_SOURCE = "google_sheets"
-
+# ============================================================
+# VARIÁVEIS ADICIONAIS
+# ============================================================
+BRL_USD = 5.0           # Taxa de câmbio USD → BRL
+MOSTRAR_ERICSSON = True  # Habilitar aba Ericsson
 # ============================================================
 # CONFIGURAÇÕES: GOOGLE SHEETS
 # ============================================================
