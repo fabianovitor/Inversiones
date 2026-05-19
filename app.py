@@ -18,9 +18,10 @@ from tabs.tab_visao_geral import renderizar as render_visao_geral
 
 
 def main():
-    # Sidebar debug (sempre visível para erros)
+    # Sidebar debug
     renderizar_sidebar_debug()
 
+    # Título SEM emoji (o emoji já está no page_icon da aba)
     st.title("Dashboard de Inversiones FCV")
     st.caption("Portfólio de dividendos | Dados ao vivo via Google Sheets")
 
