@@ -52,7 +52,7 @@ class DebugManager:
         st.session_state["debug_log"].append(entry)
 
     def log_erro(self, secao: str, erro: Exception):
-        """Registra erro com traceback completo."""
+        """Registra erro com traceback completo. SEMPRE registra."""
         entry = {
             "timestamp": datetime.now().isoformat(),
             "secao": secao,
@@ -63,7 +63,6 @@ class DebugManager:
                 "traceback": traceback.format_exc(),
             },
         }
-        # Sempre registra erros, mesmo sem debug ativo
         st.session_state["debug_log"].append(entry)
 
     def log_df(self, secao: str, nome: str, df: pd.DataFrame):
