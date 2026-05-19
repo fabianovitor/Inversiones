@@ -208,4 +208,312 @@ def _analise_rankings(df: pd.DataFrame) -> None:
                 .sort_values("yoc", ascending=False)
                 .head(5)
                 .reset_index(drop=True)
-            ) if "renda_mensal" in df.
+            ) if "renda_mensal" in df.columns else (
+                df[["ticker", "nome", "yoc"]]
+                .sort_values("yoc", ascending=False)
+                .head(5)
+                .reset_index(drop=True)
+            )
+            top_yoc.index += 1
+            st.dataframe(
+                top_yoc,
+                use_container_width=True,
+                column_config={
+                    "yoc": st.column_config.NumberColumn(
+                        "YoC %", format="%.2f%%"
+                    ),
+                    "renda_mensal": st.column_config.NumberColumn(
+                        "Renda/Mês", format="$%.2f"
+                    ),
+                },
+            )
+
+    st.divider()
+
+    col3, col4 = st.columns(2)
+
+    # --- Top 5 por lucro % ---
+    with col3:
+        st.markdown("#### 📈 Top 5 Maior Lucro %")
+        if "ticker" in df.columns and "lucro_pct" in df.columns:
+            top_lucro = (
+                df[["ticker", "nome", "lucro_pct", "lucro_usd"]]
+                .sort_values("lucro_pct", ascending=False)
+                .head(5)
+                .reset_index(drop=True)
+            ) if "lucro_usd" in df.columns else (
+                df[["ticker", "nome", "lucro_pct"]]
+                .sort_values("lucro_pct", ascending=False)
+                .head(5)
+                .reset_index(drop=True)
+            )
+            top_lucro.index += 1
+            st.dataframe(
+                top_lucro,
+                use_container_width=True,
+                column_config={
+                    "lucro_pct": st.column_config.NumberColumn(
+                        "Lucro %", format="%.2f%%"
+                    ),
+                    "lucro_usd": st.column_config.NumberColumn(
+                        "Lucro USD", format="$%.2f"
+                    ),
+                },
+            )
+
+    # --- Bottom 5 por lucro % ---
+    with col4:
+        st.markdown("#### 📉 Top 5 Menor Lucro %")
+        if "ticker" in df.columns and "lucro_pct" in df.columns:
+            bottom_lucro = (
+                df[["ticker", "nome", "lucro_pct", "lucro_usd"]]
+                .sort_values("lucro_pct", ascending=True)
+                .head(5)
+                .reset_index(drop=True)
+            ) if "lucro_usd" in df.columns else (
+                df[["ticker", "nome", "lucro_pct"]]
+                .sort_values("lucro_pct", ascending=True)
+                .head(5)
+                .reset_index(drop=True)
+            )
+            bottom_lucro.index += 1
+            st.dataframe(
+                bottom_lucro,
+                use_container_width=True,
+                column_config={
+                    "lucro_pct": st.column_config.NumberColumn(
+                        "Lucro %", format="%.2f%%"
+                    ),
+                    "lucro_usd": st.column_config.NumberColumn(
+                        "Lucro USD", format="$%.2f"
+                    ),
+                },
+            )
+
+    st.divider()
+
+    # --- Top por renda mensal ---
+    st.markdown("#### 💸 Top 10 por Renda Mensal")
+    if "ticker" in df.columns and "renda_mensal" in df.columns:
+        top_renda = (
+            df[["ticker", "nome", "qtd", "renda_mensal", "yoc"]]
+            .sort_values("renda_mensal", ascending=False)
+            .head(10)
+            .reset_index(drop=True)
+        ) if "qtd" in df.columns and "yoc" in df.columns else (
+            df[["ticker", "nome", "renda_mensal"]]
+            .sort_values("renda_mensal", ascending=False)
+            .head(10)
+            .reset_index(drop=True)
+        )
+        top_renda.index += 1
+        st.dataframe(
+            top_renda,
+            use_container_width=True,
+            column_config={
+                "renda_mensal": st.column_config.NumberColumn(
+                    "Renda/Mês", format="$%.2f"
+                ),
+                "yoc": st.column_config.NumberColumn(
+                    "YoC %", format="%.2f%%"
+                ),
+            },
+        )
+
+
+# ============================================================
+# SUBTAB 3: ALOCAÇÃO VS OBJETIVO
+# ============================================================
+
+def _analise_alocacao(df: pd.DataFrame) -> None:
+    """Análise de alocação atual versus objetivo."""
+
+    st.markdown("### ⚖️ Alocação Atual vs Objetivo")
+
+    if df.empty:
+        st.info("Sem dados disponíveis.")
+        return
+
+    colunas_map = {
+        "ticker"       : "Ticker",
+        "nome"         : "Nome",
+        "categoria"    : "Categoria",
+        "valor_atual"  : "Valor Atual",
+        "peso_pct"     : "Peso Atual %",
+        "objetivo_pct" : "Objetivo %",
+        "gap_objetivo" : "Gap %",
+    }
+
+    cols_disp = [c for c in colunas_map if c in df.columns]
+
+    if len(cols_disp) < 3:
+        st.info(
+            "Colunas de objetivo não encontradas na planilha. "
+            "Adicione 'objetivo_pct' para usar esta análise."
+        )
+
+        # Exibe alocação atual mesmo sem objetivo
+        if "ticker" in df.columns and "valor_atual" in df.columns:
+            st.markdown("#### 📌 Alocação Atual")
+            aloc = (
+                df[["ticker", "nome", "valor_atual"]]
+                .copy()
+                .sort_values("valor_atual", ascending=False)
+                .reset_index(drop=True)
+            ) if "nome" in df.columns else (
+                df[["ticker", "valor_atual"]]
+                .copy()
+                .sort_values("valor_atual", ascending=False)
+                .reset_index(drop=True)
+            )
+            total = aloc["valor_atual"].sum()
+            aloc["Peso %"] = aloc["valor_atual"] / total * 100
+            st.dataframe(
+                aloc,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "valor_atual": st.column_config.NumberColumn(
+                        "Valor", format="$%.2f"
+                    ),
+                    "Peso %": st.column_config.ProgressColumn(
+                        format="%.1f%%", min_value=0, max_value=100
+                    ),
+                },
+            )
+        return
+
+    df_aloc = (
+        df[cols_disp]
+        .copy()
+        .rename(columns={c: colunas_map[c] for c in cols_disp})
+    )
+
+    if "Valor Atual" in df_aloc.columns:
+        df_aloc = df_aloc.sort_values("Valor Atual", ascending=False)
+
+    st.dataframe(
+        df_aloc,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Valor Atual": st.column_config.NumberColumn(format="$%.2f"),
+            "Peso Atual %": st.column_config.ProgressColumn(
+                format="%.1f%%", min_value=0, max_value=100
+            ),
+            "Objetivo %": st.column_config.NumberColumn(format="%.1f%%"),
+            "Gap %": st.column_config.NumberColumn(format="%.2f%%"),
+        },
+    )
+
+    # --- Ativos que precisam de aporte ---
+    if "gap_objetivo" in df.columns:
+        st.divider()
+        st.markdown("#### 🎯 Ativos que precisam de aporte")
+        df_gap = df[df["gap_objetivo"] < 0].copy() if "gap_objetivo" in df.columns else pd.DataFrame()
+
+        if not df_gap.empty:
+            df_gap = df_gap.sort_values("gap_objetivo", ascending=True)
+            for _, row in df_gap.iterrows():
+                ticker = row.get("ticker", "")
+                gap    = safe_float(row.get("gap_objetivo", 0))
+                st.write(
+                    f"🔴 **{ticker}** — Gap: {formatar_pct(abs(gap))} abaixo do objetivo"
+                )
+        else:
+            st.success("✅ Todos os ativos estão dentro ou acima do objetivo!")
+
+
+# ============================================================
+# SUBTAB 4: RESUMO COMPLETO
+# ============================================================
+
+def _resumo_completo(resumo_p: dict, resumo_e: dict) -> None:
+    """Resumo financeiro completo do portfólio."""
+
+    st.markdown("### 📋 Resumo Financeiro Completo")
+
+    patrimonio_total = (
+        resumo_p.get("patrimonio_total", 0)
+        + resumo_e.get("patrimonio_total", 0)
+    )
+    custo_total = (
+        resumo_p.get("custo_total", 0)
+        + resumo_e.get("custo_total", 0)
+    )
+    lucro_total = (
+        resumo_p.get("lucro_total_usd", 0)
+        + resumo_e.get("lucro_total_usd", 0)
+    )
+    renda_mensal = (
+        resumo_p.get("renda_mensal", 0)
+        + resumo_e.get("renda_mensal", 0)
+    )
+    renda_anual  = renda_mensal * 12
+    lucro_pct    = (lucro_total / custo_total * 100) if custo_total > 0 else 0
+    yield_atual  = (renda_anual / patrimonio_total * 100) if patrimonio_total > 0 else 0
+
+    # --- Portfólio Total ---
+    st.markdown("#### 🌐 Portfólio Total (Principal + Ericsson)")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Patrimônio Total",  formatar_compacto(patrimonio_total))
+    c2.metric("Custo Total",       formatar_moeda(custo_total))
+    c3.metric(
+        "Lucro/Prejuízo",
+        formatar_moeda(lucro_total),
+        delta=formatar_pct(lucro_pct),
+        delta_color="normal",
+    )
+
+    c4, c5, c6 = st.columns(3)
+    c4.metric("Renda Mensal USD",  formatar_moeda(renda_mensal))
+    c5.metric("Renda Mensal BRL",  f"R$ {renda_mensal * BRL_USD:,.2f}")
+    c6.metric("Yield sobre Patrim.", formatar_pct(yield_atual))
+
+    st.divider()
+
+    # --- Carteira Principal ---
+    st.markdown("#### 📊 Carteira Principal")
+
+    r = resumo_p
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Patrimônio",    formatar_compacto(r.get("patrimonio_total", 0)))
+    c2.metric("Lucro/Prejuízo",
+              formatar_moeda(r.get("lucro_total_usd", 0)),
+              delta=formatar_pct(r.get("lucro_total_pct", 0)),
+              delta_color="normal")
+    c3.metric("Renda Mensal",  formatar_moeda(r.get("renda_mensal", 0)))
+    c4.metric("YoC Médio",     formatar_pct(r.get("yoc_medio", 0)))
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Num. Ativos",   r.get("num_ativos", 0))
+    c6.metric("DY Médio",      formatar_pct(r.get("dy_medio", 0)))
+    c7.metric("Custo Total",   formatar_moeda(r.get("custo_total", 0)))
+    c8.metric("Renda Anual",   formatar_moeda(r.get("renda_anual", 0)))
+
+    # --- Carteira Ericsson ---
+    if resumo_e:
+        st.divider()
+        st.markdown("#### 🔵 Carteira Ericsson")
+
+        e = resumo_e
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Patrimônio",    formatar_compacto(e.get("patrimonio_total", 0)))
+        d2.metric("Lucro/Prejuízo",
+                  formatar_moeda(e.get("lucro_total_usd", 0)),
+                  delta=formatar_pct(e.get("lucro_total_pct", 0)),
+                  delta_color="normal")
+        d3.metric("Renda Mensal",  formatar_moeda(e.get("renda_mensal", 0)))
+        d4.metric("YoC Médio",     formatar_pct(e.get("yoc_medio", 0)))
+
+    st.divider()
+
+    # --- Equivalências em BRL ---
+    st.markdown("#### 💱 Equivalências em BRL")
+    st.caption(f"Câmbio usado: R$ {BRL_USD:.2f} por USD")
+
+    b1, b2, b3 = st.columns(3)
+    b1.metric("Patrimônio em BRL", f"R$ {patrimonio_total * BRL_USD:,.2f}")
+    b2.metric("Renda Mensal BRL",  f"R$ {renda_mensal * BRL_USD:,.2f}")
+    b3.metric("Renda Anual BRL",   f"R$ {renda_anual * BRL_USD:,.2f}")
