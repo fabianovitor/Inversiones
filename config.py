@@ -1,102 +1,75 @@
 # ============================================================
-# config.py - Configurações centrais do dashboard
+# config.py
 # ============================================================
 
-# ============================================================
-# FONTE DE DADOS (troque aqui no futuro)
-# ============================================================
-# Opções disponíveis:
-#   "google_sheets"  -> Planilha Google Sheets (ATUAL)
-#   "ibkr_flex"      -> IBKR Flex Query (FUTURO v2.0)
-#   "ibkr_api"       -> IBKR TWS API (FUTURO v3.0)
-#   "excel_local"    -> Arquivo Excel local (BACKUP)
-
-DATA_SOURCE = "google_sheets"
-# ============================================================
-# VARIÁVEIS ADICIONAIS
-# ============================================================
-BRL_USD = 5.0           # Taxa de câmbio USD → BRL
-MOSTRAR_ERICSSON = True  # Habilitar aba Ericsson
-# ============================================================
-# CONFIGURAÇÕES: GOOGLE SHEETS
-# ============================================================
-GOOGLE_SHEETS_ID  = "1zgByQdqcNFUzXJmwbHu8TxxiLMzcD2CawB_ZEGOathU"
-GOOGLE_SHEETS_GID = "79928919"
+# URL do Google Sheets publicado como CSV
 GOOGLE_SHEETS_URL = (
-    f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_ID}"
-    f"/export?format=csv&gid={GOOGLE_SHEETS_GID}"
+    "https://docs.google.com/spreadsheets/d/SEU_ID_AQUI/export?format=csv&gid=0"
 )
 
-# ============================================================
-# CONFIGURAÇÕES: IBKR FLEX QUERY (FUTURO - deixe vazio por ora)
-# ============================================================
-IBKR_FLEX_TOKEN   = ""   # Seu token Flex Query
-IBKR_FLEX_QUERY_ID = ""  # ID da query configurada no IBKR
+# Ticker da Ericsson (ajuste conforme aparece na planilha)
+TICKER_ERICSSON = "ERIC"  # ou "ERIC B", verifique exato
 
-# ============================================================
-# CONFIGURAÇÕES: IBKR TWS API (FUTURO - deixe vazio por ora)
-# ============================================================
-IBKR_TWS_HOST = "127.0.0.1"
-IBKR_TWS_PORT = 7497
-IBKR_TWS_CLIENT_ID = 1
+# TTL do cache em segundos (5 minutos)
+CACHE_TTL_PLANILHA = 300
 
-# ============================================================
-# MAPEAMENTO DE COLUNAS: Google Sheets -> padrão dashboard
-# ============================================================
+# Mapeamento de colunas Google Sheets -> nomes internos
+# AJUSTE as chaves conforme os nomes REAIS das colunas da sua planilha
 MAPEAMENTO_COLUNAS_GS = {
-    "ticker"        : "ticker",
-    "empresa"       : "nome",
-    "categoría"     : "categoria",
-    "categoria"     : "categoria",
-    "objetivo %"    : "objetivo_pct",
-    "cantidad"      : "qtd",
-    "precio medio"  : "pm_usd",
-    "dividendos ttm": "div_anual",
-    "yield on cost" : "yoc_planilha",
-    "precio actual" : "preco_atual_planilha",
-    "valor total"   : "valor_total_planilha",
-    "% actual"      : "peso_planilha",
-    "diferencia"    : "diferenca",
-    "accion"        : "acao",
-    "valor"         : "valor_acao",
-}
+    # Identificação
+    "ticker":           "ticker",
+    "ativo":            "ticker",
+    "symbol":           "ticker",
+    "nome":             "nome",
+    "name":             "nome",
+    "setor":            "setor",
+    "sector":           "setor",
+    "categoria":        "categoria",
+    "category":         "categoria",
 
-# ============================================================
-# IDENTIFICAÇÃO DE CARTEIRAS
-# ============================================================
-TICKER_ERICSSON = "ERIC"   # Ticker que identifica carteira Ericsson
+    # Quantidades e preços
+    "qtd":              "qtd",
+    "quantidade":       "qtd",
+    "quantity":         "qtd",
+    "shares":           "qtd",
+    "pm":               "pm_usd",
+    "pm (usd)":         "pm_usd",
+    "preco medio":      "pm_usd",
+    "preco_medio":      "pm_usd",
+    "avg price":        "pm_usd",
+    "avg_price":        "pm_usd",
 
-# ============================================================
-# CONFIGURAÇÕES DE CACHE
-# ============================================================
-CACHE_TTL_PLANILHA  = 300   # 5 minutos (Google Sheets)
-CACHE_TTL_MERCADO   = 180   # 3 minutos (Yahoo Finance)
+    # Dividendos
+    "div anual":        "div_anual",
+    "div_anual":        "div_anual",
+    "dividendo anual":  "div_anual",
+    "annual div":       "div_anual",
+    "annual_div":       "div_anual",
+    "dps":              "div_anual",
 
-# ============================================================
-# MOEDA E FORMATAÇÃO
-# ============================================================
-MOEDA_SIMBOLO = "USD"
-MOEDA_LOCALE  = "en_US"
+    # YoC
+    "yoc":              "yoc_planilha",
+    "yield on cost":    "yoc_planilha",
 
-# ============================================================
-# CORES DO DASHBOARD
-# ============================================================
-CORES = {
-    "positivo"  : "#00C853",
-    "negativo"  : "#FF1744",
-    "neutro"    : "#9E9E9E",
-    "primario"  : "#1565C0",
-    "secundario": "#FFA000",
-    "fundo"     : "#0E1117",
-}
+    # Preço atual
+    "preco atual":      "preco_atual_planilha",
+    "preco_atual":      "preco_atual_planilha",
+    "current price":    "preco_atual_planilha",
+    "cotacao":          "preco_atual_planilha",
 
-# ============================================================
-# TOOLTIPS
-# ============================================================
-TOOLTIPS = {
-    "patrimonio"   : "Valor total da carteira a preço atual de mercado.",
-    "renda_mensal" : "Estimativa de dividendos mensais (Dividendos TTM ÷ 12).",
-    "dy"           : "Dividend Yield: dividendos anuais ÷ preço atual.",
-    "yoc"          : "Yield on Cost: dividendos anuais ÷ preço médio de compra.",
-    "lucro"        : "Diferença entre valor atual e custo total investido.",
+    # Valor total
+    "valor total":      "valor_total_planilha",
+    "valor_total":      "valor_total_planilha",
+    "total value":      "valor_total_planilha",
+    "market value":     "valor_total_planilha",
+
+    # Peso
+    "peso":             "peso_planilha",
+    "weight":           "peso_planilha",
+    "% carteira":       "peso_planilha",
+
+    # Objetivo
+    "objetivo":         "objetivo_pct",
+    "target":           "objetivo_pct",
+    "target %":         "objetivo_pct",
 }
