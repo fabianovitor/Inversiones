@@ -1,235 +1,165 @@
 # ============================================================
-# data_loader.py - Orquestrador de dados
-# Busca da fonte configurada + enriquece com mercado
+# data_loader.py - Carregamento e processamento de dados
 # ============================================================
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
-from data_sources import get_data_source
-from market_data import enriquecer_ativo
-from utils import safe_float, safe_div
+from config import (
+    GOOGLE_SHEETS_URL,
+    MAPEAMENTO_COLUNAS_GS,
+    TICKER_ERICSSON,
+    CACHE_TTL_PLANILHA,
+)
+from utils import safe_float
 
 
-# ============================================================
-# FUNÇÃO PRINCIPAL - usada pelo app.py
-# ============================================================
+@st.cache_data(ttl=CACHE_TTL_PLANILHA)
+def carregar_planilha() -> pd.DataFrame:
+    """Carrega dados do Google Sheets."""
+    try:
+        df = pd.read_csv(GOOGLE_SHEETS_URL)
+        df.columns = [c.strip().lower() for c in df.columns]
 
-def carregar_carteira() -> pd.DataFrame:
-    """Carrega carteira da fonte configurada em config.py.
-    
-    Fluxo:
-        1. Detecta fonte ativa (Google Sheets, IBKR, etc.)
-        2. Carrega dados brutos
-        3. Enriquece com dados de mercado (yfinance)
-        4. Calcula métricas derivadas
-    
-    Returns:
-        DataFrame completo pronto para o dashboard
-    """
-    # 1. Obtém a fonte configurada
-    fonte = get_data_source()
+        # Renomear colunas
+        mapa = {k.lower(): v for k, v in MAPEAMENTO_COLUNAS_GS.items()}
+        df = df.rename(columns=mapa)
 
-    with st.spinner(f"📊 Carregando dados de {fonte.nome_fonte()}..."):
-        df = fonte.carregar()
+        # Colunas numéricas
+        numericas = [
+            "qtd", "pm_usd", "div_anual", "yoc_planilha",
+            "preco_atual_planilha", "valor_total_planilha",
+            "peso_planilha", "objetivo_pct",
+        ]
+        for col in numericas:
+            if col in df.columns:
+                df[col] = pd.to_numeric(
+                    df[col].astype(str)
+                    .str.replace(",", ".", regex=False)
+                    .str.replace("%", "", regex=False)
+                    .str.strip(),
+                    errors="coerce",
+                ).fillna(0)
 
-    if df is None or df.empty:
-        st.error(
-            f"❌ Nenhum dado retornado de {fonte.nome_fonte()}.\n\n"
-            "Verifique as configurações no config.py."
-        )
+        return df
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar planilha: {e}")
         return pd.DataFrame()
 
-    # 2. Enriquece com dados de mercado
-    df = enriquecer_carteira(df)
 
-    return df
+def separar_carteiras(df: pd.DataFrame):
+    """Separa carteira principal e Ericsson."""
+    if df.empty:
+        return df, pd.DataFrame()
 
+    if "ticker" not in df.columns:
+        return df, pd.DataFrame()
 
-# ============================================================
-# ENRIQUECIMENTO COM DADOS DE MERCADO
-# ============================================================
-
-def enriquecer_carteira(df: pd.DataFrame) -> pd.DataFrame:
-    """Adiciona cotações e calcula métricas derivadas.
-    
-    Args:
-        df: DataFrame normalizado da fonte de dados
-    
-    Returns:
-        DataFrame enriquecido com métricas calculadas
-    """
-    if df is None or df.empty:
-        return df
-
-    df = df.copy()
-
-    # Inicializa colunas de mercado
-    df["preco_atual"]  = 0.0
-    df["variacao_pct"] = 0.0
-    df["div_yield"]    = 0.0
-    df["setor"]        = ""
-
-    # Busca dados de mercado para cada ticker
-    total = len(df)
-    progress = st.progress(0, text="🌐 Buscando cotações...")
-
-    for i, row in df.iterrows():
-        ticker = row["ticker"]
-        progresso_pct = (i + 1) / total
-        progress.progress(progresso_pct, text=f"📈 Buscando {ticker}...")
-
-        dados = enriquecer_ativo(ticker)
-
-        # --- Preço atual ---
-        # Prioridade: planilha > yfinance
-        preco_planilha = safe_float(row.get("preco_atual_planilha", 0))
-        if preco_planilha > 0:
-            df.at[i, "preco_atual"] = preco_planilha
-        else:
-            df.at[i, "preco_atual"] = safe_float(dados.get("preco_atual"))
-
-        # --- Variação do dia (sempre do yfinance) ---
-        df.at[i, "variacao_pct"] = safe_float(dados.get("variacao_pct"))
-
-        # --- Setor ---
-        setor_yf = dados.get("setor") or ""
-        df.at[i, "setor"] = setor_yf if setor_yf else row.get("categoria", "Outros")
-
-        # --- Dividend Yield ---
-        # Prioridade: planilha > yfinance
-        yoc_planilha = safe_float(row.get("yoc_planilha", 0))
-        if yoc_planilha > 0:
-            df.at[i, "div_yield"] = yoc_planilha / 100
-        else:
-            df.at[i, "div_yield"] = safe_float(dados.get("div_yield"))
-
-        # --- Dividendos anuais por ação ---
-        div_planilha = safe_float(row.get("div_anual", 0))
-        if div_planilha > 0:
-            df.at[i, "div_anual"] = div_planilha
-        else:
-            df.at[i, "div_anual"] = safe_float(dados.get("div_anual"))
-
-    progress.empty()
-
-    # ----------------------------------------------------------
-    # CÁLCULOS DERIVADOS
-    # ----------------------------------------------------------
-    df = calcular_metricas(df)
-
-    return df
-
-
-# ============================================================
-# CÁLCULO DE MÉTRICAS
-# ============================================================
-
-def calcular_metricas(df: pd.DataFrame) -> pd.DataFrame:
-    """Calcula todas as métricas derivadas do portfolio.
-    
-    Args:
-        df: DataFrame com preços e dados base
-    
-    Returns:
-        DataFrame com métricas calculadas
-    """
-    df = df.copy()
-
-    # --- Valores base ---
-    df["custo_total"]  = df["qtd"] * df["pm_usd"]
-    df["valor_atual"]  = df["qtd"] * df["preco_atual"]
-
-    # --- Lucro / Prejuízo ---
-    df["lucro_usd"] = df["valor_atual"] - df["custo_total"]
-    df["lucro_pct"] = df.apply(
-        lambda r: safe_div(r["lucro_usd"], r["custo_total"]) * 100,
-        axis=1
-    )
-
-    # --- Renda de dividendos ---
-    df["div_recebido_anual"] = df["qtd"] * df["div_anual"].fillna(0)
-    df["renda_mensal"]       = df["div_recebido_anual"] / 12
-
-    # --- Yield on Cost ---
-    df["yoc"] = df.apply(
-        lambda r: safe_div(r["div_recebido_anual"], r["custo_total"]) * 100,
-        axis=1
-    )
-
-    # --- Dividend Yield (sobre preço atual) ---
-    df["dy_atual"] = df.apply(
-        lambda r: safe_div(r["div_recebido_anual"], r["valor_atual"]) * 100,
-        axis=1
-    )
-
-    # --- Peso % na carteira (recalculado) ---
-    total_carteira = df["valor_atual"].sum()
-    df["peso_pct"] = df.apply(
-        lambda r: safe_div(r["valor_atual"], total_carteira) * 100,
-        axis=1
-    )
-
-    # --- Diferença objetivo vs atual ---
-    df["gap_objetivo"] = df.apply(
-        lambda r: r.get("objetivo_pct", 0) - r["peso_pct"],
-        axis=1
-    )
-
-    return df
-
-
-# ============================================================
-# FUNÇÕES AUXILIARES
-# ============================================================
-
-def separar_carteiras(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Separa carteira principal da carteira Ericsson.
-    
-    Args:
-        df: DataFrame completo
-    
-    Returns:
-        Tupla (df_principal, df_ericsson)
-    """
-    if df is None or df.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    df_principal = df[df["tipo"] == "principal"].copy()
-    df_ericsson  = df[df["tipo"] == "ericsson"].copy()
+    mask_eric = df["ticker"].astype(str).str.upper() == TICKER_ERICSSON.upper()
+    df_ericsson  = df[mask_eric].copy().reset_index(drop=True)
+    df_principal = df[~mask_eric].copy().reset_index(drop=True)
 
     return df_principal, df_ericsson
 
 
+@st.cache_data(ttl=CACHE_TTL_PLANILHA)
+def enriquecer_dados(df: pd.DataFrame) -> pd.DataFrame:
+    """Enriquece DataFrame com cálculos derivados."""
+    if df.empty:
+        return df
+
+    df = df.copy()
+
+    # Preço atual
+    if "preco_atual_planilha" in df.columns:
+        df["preco_atual"] = df["preco_atual_planilha"]
+    elif "pm_usd" in df.columns:
+        df["preco_atual"] = df["pm_usd"]
+    else:
+        df["preco_atual"] = 0.0
+
+    # Valor atual
+    if "valor_total_planilha" in df.columns:
+        df["valor_atual"] = df["valor_total_planilha"]
+    elif "qtd" in df.columns and "preco_atual" in df.columns:
+        df["valor_atual"] = df["qtd"] * df["preco_atual"]
+    else:
+        df["valor_atual"] = 0.0
+
+    # Custo total
+    if "qtd" in df.columns and "pm_usd" in df.columns:
+        df["custo_total"] = df["qtd"] * df["pm_usd"]
+    else:
+        df["custo_total"] = df["valor_atual"].copy()
+
+    # Lucro
+    df["lucro_usd"] = df["valor_atual"] - df["custo_total"]
+    df["lucro_pct"] = df.apply(
+        lambda r: (r["lucro_usd"] / r["custo_total"] * 100)
+        if safe_float(r.get("custo_total", 0)) > 0 else 0,
+        axis=1,
+    )
+
+    # Renda mensal
+    if "div_anual" in df.columns and "qtd" in df.columns:
+        df["renda_mensal"] = df["qtd"] * df["div_anual"] / 12
+    else:
+        df["renda_mensal"] = 0.0
+
+    # YoC
+    if "yoc_planilha" in df.columns:
+        df["yoc"] = df["yoc_planilha"]
+    elif "div_anual" in df.columns and "pm_usd" in df.columns:
+        df["yoc"] = df.apply(
+            lambda r: (r["div_anual"] / r["pm_usd"] * 100)
+            if safe_float(r.get("pm_usd", 0)) > 0 else 0,
+            axis=1,
+        )
+    else:
+        df["yoc"] = 0.0
+
+    # DY atual
+    if "div_anual" in df.columns and "preco_atual" in df.columns:
+        df["dy_atual"] = df.apply(
+            lambda r: (r["div_anual"] / r["preco_atual"] * 100)
+            if safe_float(r.get("preco_atual", 0)) > 0 else 0,
+            axis=1,
+        )
+    else:
+        df["dy_atual"] = 0.0
+
+    # Peso %
+    total = df["valor_atual"].sum()
+    df["peso_pct"] = df["valor_atual"].apply(
+        lambda v: (v / total * 100) if total > 0 else 0
+    )
+
+    return df
+
+
 def resumo_carteira(df: pd.DataFrame) -> dict:
-    """Retorna métricas resumidas da carteira.
-    
-    Args:
-        df: DataFrame da carteira
-    
-    Returns:
-        Dicionário com métricas principais
-    """
+    """Calcula resumo da carteira."""
     if df is None or df.empty:
         return {}
 
+    patrimonio   = safe_float(df["valor_atual"].sum()) if "valor_atual" in df.columns else 0
+    custo_total  = safe_float(df["custo_total"].sum()) if "custo_total" in df.columns else 0
+    lucro_usd    = patrimonio - custo_total
+    lucro_pct    = (lucro_usd / custo_total * 100) if custo_total > 0 else 0
+    renda_mensal = safe_float(df["renda_mensal"].sum()) if "renda_mensal" in df.columns else 0
+    renda_anual  = renda_mensal * 12
+    yoc_medio    = safe_float(df["yoc"].mean()) if "yoc" in df.columns else 0
+    dy_medio     = (renda_anual / patrimonio * 100) if patrimonio > 0 else 0
+    num_ativos   = df["ticker"].nunique() if "ticker" in df.columns else 0
+
     return {
-        "patrimonio_total"  : df["valor_atual"].sum(),
-        "custo_total"       : df["custo_total"].sum(),
-        "lucro_total_usd"   : df["lucro_usd"].sum(),
-        "lucro_total_pct"   : safe_div(
-                                df["lucro_usd"].sum(),
-                                df["custo_total"].sum()
-                              ) * 100,
-        "renda_mensal"      : df["renda_mensal"].sum(),
-        "renda_anual"       : df["div_recebido_anual"].sum(),
-        "num_ativos"        : len(df),
-        "yoc_medio"         : safe_div(
-                                df["div_recebido_anual"].sum(),
-                                df["custo_total"].sum()
-                              ) * 100,
-        "dy_medio"          : safe_div(
-                                df["div_recebido_anual"].sum(),
-                                df["valor_atual"].sum()
-                              ) * 100,
+        "patrimonio_total" : patrimonio,
+        "custo_total"      : custo_total,
+        "lucro_total_usd"  : lucro_usd,
+        "lucro_total_pct"  : lucro_pct,
+        "renda_mensal"     : renda_mensal,
+        "renda_anual"      : renda_anual,
+        "yoc_medio"        : yoc_medio,
+        "dy_medio"         : dy_medio,
+        "num_ativos"       : num_ativos,
     }
