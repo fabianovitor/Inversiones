@@ -1,96 +1,200 @@
 # ============================================================
-# data_loader.py - Carregamento e processamento da planilha
+# data_loader.py - Carregamento via Google Sheets
 # ============================================================
 
 import streamlit as st
 import pandas as pd
-import os
-from config import PLANILHA_PATH, COLUNAS_PLANILHA
+import requests
+from io import StringIO
+from config import (
+    GOOGLE_SHEETS_URL,
+    MAPEAMENTO_COLUNAS,
+    TICKER_ERICSSON,
+)
 from market_data import enriquecer_ativo
 from utils import safe_float, safe_div
 
 
 # ============================================================
-# CARREGAR PLANILHA
+# CARREGAR PLANILHA DO GOOGLE SHEETS
 # ============================================================
 
-@st.cache_data(ttl=60, show_spinner=False)
-def carregar_planilha(caminho=PLANILHA_PATH):
-    """Carrega a planilha Excel da carteira.
+@st.cache_data(ttl=300, show_spinner=False)
+def carregar_planilha(url=GOOGLE_SHEETS_URL):
+    """Carrega a planilha direto do Google Sheets via URL CSV.
     
     Args:
-        caminho: caminho do arquivo .xlsx
+        url: URL de exportação CSV do Google Sheets
     
     Returns:
-        DataFrame com a carteira ou None se falhar
+        DataFrame normalizado ou None se falhar
     """
-    if not os.path.exists(caminho):
-        st.error(f"❌ Planilha não encontrada: {caminho}")
-        st.info(
-            "Crie um arquivo `carteira.xlsx` na raiz do projeto com as colunas: "
-            f"{', '.join(COLUNAS_PLANILHA)}"
-        )
-        return None
-    
     try:
-        df = pd.read_excel(caminho)
+        # Faz download do CSV
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
         
-        # Normaliza nomes das colunas (lowercase, sem espaços)
+        # Lê CSV
+        df = pd.read_csv(StringIO(response.text))
+        
+        # Normaliza nomes das colunas (lowercase, sem espaços extras)
         df.columns = [str(c).strip().lower() for c in df.columns]
         
-        # Valida colunas obrigatórias
-        colunas_faltando = [c for c in COLUNAS_PLANILHA if c not in df.columns]
-        if colunas_faltando:
+        # Mantém apenas as colunas A-N (primeiras 14)
+        if len(df.columns) > 14:
+            df = df.iloc[:, :14]
+        
+        # Renomeia colunas para padrão do dashboard
+        df = df.rename(columns=MAPEAMENTO_COLUNAS)
+        
+        # Valida colunas essenciais
+        colunas_essenciais = ["ticker", "qtd", "pm_usd"]
+        faltando = [c for c in colunas_essenciais if c not in df.columns]
+        if faltando:
             st.error(
-                f"❌ Colunas faltando na planilha: {colunas_faltando}\n\n"
-                f"Colunas esperadas: {COLUNAS_PLANILHA}\n"
+                f"❌ Colunas essenciais faltando: {faltando}\n\n"
                 f"Colunas encontradas: {list(df.columns)}"
             )
             return None
         
-        # Remove linhas vazias
-        df = df.dropna(subset=["ticker"])
-        
-        # Normaliza tipos
-        df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
-        df["tipo"] = df["tipo"].astype(str).str.lower().str.strip()
-        df["qtd"] = pd.to_numeric(df["qtd"], errors="coerce").fillna(0)
-        df["pm_usd"] = pd.to_numeric(df["pm_usd"], errors="coerce").fillna(0)
-        
-        # Remove ativos sem quantidade
-        df = df[df["qtd"] > 0].reset_index(drop=True)
+        # Limpa e normaliza
+        df = limpar_dados(df)
         
         return df
     
+    except requests.exceptions.RequestException as e:
+        st.error(
+            f"❌ Erro ao acessar Google Sheets: {e}\n\n"
+            "Verifique se a planilha está pública (Compartilhar → "
+            "Qualquer pessoa com o link → Leitor)."
+        )
+        return None
     except Exception as e:
-        st.error(f"❌ Erro ao ler planilha: {e}")
+        st.error(f"❌ Erro ao processar planilha: {e}")
         return None
 
 
+def limpar_dados(df):
+    """Limpa e normaliza os dados da planilha.
+    
+    Args:
+        df: DataFrame bruto
+    
+    Returns:
+        DataFrame limpo
+    """
+    df = df.copy()
+    
+    # Remove linhas sem ticker
+    df = df.dropna(subset=["ticker"])
+    df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
+    df = df[df["ticker"] != ""]
+    df = df[df["ticker"] != "NAN"]
+    
+    # Converte colunas numéricas (limpa formatação como "$", ",", "%")
+    colunas_numericas = [
+        "qtd", "pm_usd", "div_anual", "yoc_planilha",
+        "preco_atual_planilha", "valor_total_planilha",
+        "peso_planilha", "objetivo_pct", "diferenca", "valor_acao"
+    ]
+    
+    for col in colunas_numericas:
+        if col in df.columns:
+            df[col] = df[col].apply(limpar_numero)
+    
+    # Preenche colunas opcionais que podem não existir
+    if "nome" not in df.columns:
+        df["nome"] = df["ticker"]
+    else:
+        df["nome"] = df["nome"].fillna(df["ticker"]).astype(str)
+    
+    if "categoria" not in df.columns:
+        df["categoria"] = "Outros"
+    else:
+        df["categoria"] = df["categoria"].fillna("Outros").astype(str)
+    
+    # Define o tipo (principal ou ericsson) baseado no ticker
+    df["tipo"] = df["ticker"].apply(
+        lambda t: "ericsson" if t == TICKER_ERICSSON else "principal"
+    )
+    
+    # Remove ativos sem quantidade
+    df = df[df["qtd"] > 0].reset_index(drop=True)
+    
+    return df
+
+
+def limpar_numero(valor):
+    """Converte valores com formatação ($, ,, %) para float.
+    
+    Exemplos:
+        "$1,234.50" -> 1234.50
+        "5.25%"     -> 5.25
+        "1.234,50"  -> 1234.50 (formato BR)
+        "-"         -> 0.0
+    """
+    if pd.isna(valor) or valor is None:
+        return 0.0
+    
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    
+    try:
+        # Remove caracteres não numéricos comuns
+        s = str(valor).strip()
+        s = s.replace("$", "").replace("€", "").replace("R$", "")
+        s = s.replace("%", "").replace(" ", "")
+        
+        # Detecta formato BR vs US
+        # Se tem vírgula E ponto, ponto é separador de milhar (formato US: 1,234.50)
+        # Se tem só vírgula, vírgula é decimal (formato BR: 1234,50)
+        if "," in s and "." in s:
+            # Formato US: 1,234.50
+            s = s.replace(",", "")
+        elif "," in s:
+            # Formato BR: 1234,50
+            s = s.replace(",", ".")
+        
+        if s == "" or s == "-" or s.lower() == "nan":
+            return 0.0
+        
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 # ============================================================
-# ENRIQUECER CARTEIRA COM DADOS DE MERCADO
+# ENRIQUECER COM DADOS DE MERCADO (yfinance)
 # ============================================================
 
-def enriquecer_carteira(df):
-    """Adiciona dados de mercado (preço, DY, etc.) à carteira.
+def enriquecer_carteira(df, usar_planilha=True):
+    """Adiciona dados de mercado e calcula métricas.
     
     Args:
         df: DataFrame da planilha
+        usar_planilha: Se True, usa preços/dividendos da planilha;
+                      Se False, busca tudo via yfinance
     
     Returns:
-        DataFrame enriquecido com colunas calculadas
+        DataFrame enriquecido
     """
     if df is None or df.empty:
         return df
     
-    # Cria cópia para não alterar original
     df = df.copy()
     
-    # Inicializa colunas de mercado
+    # Inicializa colunas
     df["preco_atual"] = 0.0
     df["variacao_pct"] = 0.0
     df["div_yield"] = 0.0
-    df["div_anual"] = 0.0
+    df["setor"] = ""
+    
+    # Decide a estratégia
+    if usar_planilha:
+        # Usa preço da planilha como base, busca só variação/setor via yfinance
+        st.info("📊 Usando preços da planilha + buscando variação do dia...")
+    else:
+        st.info("🌐 Buscando todos os dados via Yahoo Finance...")
     
     # Busca dados de cada ticker
     progress_bar = st.progress(0, text="Buscando cotações...")
@@ -98,171 +202,52 @@ def enriquecer_carteira(df):
     
     for i, row in df.iterrows():
         ticker = row["ticker"]
-        progress_bar.progress((i + 1) / total, text=f"Buscando {ticker}...")
+        progress_bar.progress((i + 1) / total, text=f"Processando {ticker}...")
         
         dados = enriquecer_ativo(ticker)
         
-        df.at[i, "preco_atual"] = safe_float(dados.get("preco_atual"))
-        df.at[i, "variacao_pct"] = safe_float(dados.get("variacao_pct"))
-        df.at[i, "div_yield"] = safe_float(dados.get("div_yield"))
-        df.at[i, "div_anual"] = safe_float(dados.get("div_anual"))
+        if usar_planilha and row.get("preco_atual_planilha", 0) > 0:
+            # Usa preço da planilha
+            df.at[i, "preco_atual"] = safe_float(row["preco_atual_planilha"])
+        else:
+            # Usa preço do yfinance
+            df.at[i, "preco_atual"] = safe_float(dados.get("preco_atual"))
         
-        # Atualiza setor se vazio na planilha
-        if pd.isna(row.get("setor")) or not str(row.get("setor", "")).strip():
-            df.at[i, "setor"] = dados.get("setor", "Outros")
+        df.at[i, "variacao_pct"] = safe_float(dados.get("variacao_pct"))
+        df.at[i, "setor"] = dados.get("setor") or row.get("categoria", "Outros")
+        
+        # DY: usa da planilha se tiver, senão do yfinance
+        if usar_planilha and row.get("yoc_planilha", 0) > 0:
+            df.at[i, "div_yield"] = safe_float(row["yoc_planilha"]) / 100
+        else:
+            df.at[i, "div_yield"] = safe_float(dados.get("div_yield"))
+        
+        # Dividendos anuais por ação (usa da planilha)
+        if "div_anual" not in df.columns or pd.isna(row.get("div_anual")):
+            df.at[i, "div_anual"] = safe_float(dados.get("div_anual"))
     
     progress_bar.empty()
     
     # ----- CÁLCULOS DERIVADOS -----
     
-    # Valor investido (custo)
+    # Custo total = qtd × pm_usd
     df["custo_total"] = df["qtd"] * df["pm_usd"]
     
-    # Valor atual de mercado
+    # Valor atual = qtd × preco_atual
     df["valor_atual"] = df["qtd"] * df["preco_atual"]
     
-    # Lucro/Prejuízo em USD
+    # Lucro/Prejuízo
     df["lucro_usd"] = df["valor_atual"] - df["custo_total"]
-    
-    # Lucro/Prejuízo em %
     df["lucro_pct"] = df.apply(
         lambda r: safe_div(r["lucro_usd"], r["custo_total"]) * 100,
         axis=1
     )
     
-    # Dividendos anuais estimados (USD)
-    # Usa div_anual se disponível, senão calcula via DY
-    df["div_recebido_anual"] = df.apply(
-        lambda r: r["qtd"] * r["div_anual"] if r["div_anual"] > 0
-        else r["valor_atual"] * r["div_yield"],
-        axis=1
-    )
-    
-    # Renda mensal estimada
+    # Renda de dividendos
+    # div_anual já é o valor por ação (Dividendos TTM da planilha)
+    df["div_recebido_anual"] = df["qtd"] * df["div_anual"].fillna(0)
     df["renda_mensal"] = df["div_recebido_anual"] / 12
     
-    # Yield on Cost (YoC) - rentabilidade sobre o preço de compra
+    # Yield on Cost
     df["yoc"] = df.apply(
-        lambda r: safe_div(r["div_recebido_anual"], r["custo_total"]) * 100,
-        axis=1
-    )
-    
-    # Peso na carteira (calculado depois pela função separar_carteiras)
-    df["peso_pct"] = 0.0
-    
-    return df
-
-
-# ============================================================
-# SEPARAR CARTEIRA PRINCIPAL E ERICSSON
-# ============================================================
-
-def separar_carteiras(df):
-    """Separa a carteira em principal e Ericsson.
-    
-    Args:
-        df: DataFrame enriquecido
-    
-    Returns:
-        tuple: (df_principal, df_ericsson)
-    """
-    if df is None or df.empty:
-        return pd.DataFrame(), pd.DataFrame()
-    
-    df_principal = df[df["tipo"] == "principal"].copy().reset_index(drop=True)
-    df_ericsson = df[df["tipo"] == "ericsson"].copy().reset_index(drop=True)
-    
-    # Calcula peso percentual em cada carteira
-    if not df_principal.empty:
-        total_principal = df_principal["valor_atual"].sum()
-        if total_principal > 0:
-            df_principal["peso_pct"] = (df_principal["valor_atual"] / total_principal) * 100
-    
-    if not df_ericsson.empty:
-        total_ericsson = df_ericsson["valor_atual"].sum()
-        if total_ericsson > 0:
-            df_ericsson["peso_pct"] = (df_ericsson["valor_atual"] / total_ericsson) * 100
-    
-    return df_principal, df_ericsson
-
-
-# ============================================================
-# CALCULAR MÉTRICAS RESUMO
-# ============================================================
-
-def calcular_metricas(df):
-    """Calcula métricas resumo de uma carteira.
-    
-    Args:
-        df: DataFrame de uma carteira (principal ou ericsson)
-    
-    Returns:
-        dict com: patrimonio, custo_total, lucro_usd, lucro_pct,
-                  renda_mensal, renda_anual, dy_medio, yoc_medio
-    """
-    if df is None or df.empty:
-        return {
-            "patrimonio": 0.0,
-            "custo_total": 0.0,
-            "lucro_usd": 0.0,
-            "lucro_pct": 0.0,
-            "renda_mensal": 0.0,
-            "renda_anual": 0.0,
-            "dy_medio": 0.0,
-            "yoc_medio": 0.0,
-            "num_ativos": 0,
-        }
-    
-    patrimonio = df["valor_atual"].sum()
-    custo_total = df["custo_total"].sum()
-    lucro_usd = df["lucro_usd"].sum()
-    lucro_pct = safe_div(lucro_usd, custo_total) * 100
-    renda_anual = df["div_recebido_anual"].sum()
-    renda_mensal = renda_anual / 12
-    
-    # DY médio ponderado pelo valor atual
-    dy_medio = safe_div(renda_anual, patrimonio) * 100
-    
-    # YoC médio ponderado pelo custo
-    yoc_medio = safe_div(renda_anual, custo_total) * 100
-    
-    return {
-        "patrimonio": patrimonio,
-        "custo_total": custo_total,
-        "lucro_usd": lucro_usd,
-        "lucro_pct": lucro_pct,
-        "renda_mensal": renda_mensal,
-        "renda_anual": renda_anual,
-        "dy_medio": dy_medio,
-        "yoc_medio": yoc_medio,
-        "num_ativos": len(df),
-    }
-
-
-# ============================================================
-# CRIAR PLANILHA EXEMPLO (caso o usuário não tenha)
-# ============================================================
-
-def criar_planilha_exemplo(caminho=PLANILHA_PATH):
-    """Cria uma planilha exemplo se não existir.
-    
-    Útil para o primeiro uso do dashboard.
-    """
-    if os.path.exists(caminho):
-        return False
-    
-    exemplo = pd.DataFrame([
-        {"ticker": "AAPL", "nome": "Apple Inc.", "tipo": "principal",
-         "setor": "Technology", "qtd": 10, "pm_usd": 150.00},
-        {"ticker": "MSFT", "nome": "Microsoft Corp.", "tipo": "principal",
-         "setor": "Technology", "qtd": 5, "pm_usd": 300.00},
-        {"ticker": "JNJ", "nome": "Johnson & Johnson", "tipo": "principal",
-         "setor": "Healthcare", "qtd": 8, "pm_usd": 160.00},
-        {"ticker": "KO", "nome": "Coca-Cola", "tipo": "principal",
-         "setor": "Consumer", "qtd": 20, "pm_usd": 55.00},
-        {"ticker": "ERIC", "nome": "Ericsson", "tipo": "ericsson",
-         "setor": "Technology", "qtd": 100, "pm_usd": 6.50},
-    ])
-    
-    exemplo.to_excel(caminho, index=False)
-    return True
+        lambda r: safe_div(r["div_recebido_
