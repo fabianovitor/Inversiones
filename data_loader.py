@@ -20,9 +20,9 @@ def _limpar_numero(valor_str) -> float:
     if valor_str is None:
         return 0.0
     s = str(valor_str).strip()
-    if s == "" or s.lower() in ("nan", "none", "-", "n/a", "#n/a", "#value!"):
+    if s == "" or s.lower() in ("nan", "none", "-", "n/a", "#n/a", "#value!", "#ref!"):
         return 0.0
-    # Remove símbolos de moeda e espaços (não deve ter BRL, mas limpa por segurança)
+    # Remove símbolos de moeda e espaços
     s = re.sub(r"[R$\$€£¥\s]", "", s)
     # Trata formato 1.234,56 -> 1234.56
     if "," in s and "." in s:
@@ -45,12 +45,18 @@ def carregar_planilha() -> pd.DataFrame:
     try:
         df = pd.read_csv(GOOGLE_SHEETS_URL)
 
-        # Normaliza colunas
+        # Normaliza colunas: minúsculas + sem espaços extras
         df.columns = [c.strip().lower() for c in df.columns]
 
-        # Renomeia colunas conforme mapeamento
-        mapa = {k.lower(): v for k, v in MAPEAMENTO_COLUNAS_GS.items()}
+        # Log das colunas originais para debug
+        print(f"[DEBUG] Colunas originais após normalização: {list(df.columns)}")
+        print(f"[DEBUG] Primeiras linhas:\n{df.head(3)}")
+
+        # Renomeia conforme mapeamento
+        mapa = {k.strip().lower(): v for k, v in MAPEAMENTO_COLUNAS_GS.items()}
         df = df.rename(columns=mapa)
+
+        print(f"[DEBUG] Colunas após mapeamento: {list(df.columns)}")
 
         # Converte colunas numéricas (já em USD na planilha)
         numericas = [
@@ -62,12 +68,15 @@ def carregar_planilha() -> pd.DataFrame:
             if col in df.columns:
                 df[col] = df[col].apply(_limpar_numero)
 
-        # Remove linhas com ticker vazio
+        # Remove linhas com ticker vazio ou inválido
         if "ticker" in df.columns:
             df = df[df["ticker"].notna()]
             df = df[df["ticker"].astype(str).str.strip() != ""]
-            df = df[~df["ticker"].astype(str).str.strip().str.startswith("#")]
+            df = df[~df["ticker"].astype(str).str.strip().str.upper().isin(
+                ["NAN", "NONE", "N/A", "#N/A", "TICKER"]
+            )]
 
+        print(f"[DEBUG] Total linhas carregadas: {len(df)}")
         return df.reset_index(drop=True)
 
     except Exception as e:
@@ -77,6 +86,8 @@ def carregar_planilha() -> pd.DataFrame:
             debug.log_erro("carregar_planilha", e)
         except Exception:
             pass
+        import traceback
+        print(f"[ERROR] {traceback.format_exc()}")
         return pd.DataFrame()
 
 
@@ -101,15 +112,14 @@ def separar_carteiras(df: pd.DataFrame):
 def enriquecer_dados(df: pd.DataFrame) -> pd.DataFrame:
     """
     Enriquece DataFrame com cálculos derivados.
-    TODOS os valores monetários são mantidos em USD.
-    A planilha já fornece dados em USD.
+    TODOS os valores monetários mantidos em USD.
     """
     if df.empty:
         return df
 
     df = df.copy()
 
-    # Preço atual (USD) — usa planilha diretamente
+    # Preço atual (USD)
     if "preco_atual_planilha" in df.columns:
         df["preco_atual"] = df["preco_atual_planilha"].apply(safe_float)
     elif "pm_usd" in df.columns:
@@ -117,7 +127,7 @@ def enriquecer_dados(df: pd.DataFrame) -> pd.DataFrame:
     else:
         df["preco_atual"] = 0.0
 
-    # Valor atual (USD) — usa planilha diretamente
+    # Valor atual (USD)
     if "valor_total_planilha" in df.columns:
         df["valor_atual"] = df["valor_total_planilha"].apply(safe_float)
     elif "qtd" in df.columns and "preco_atual" in df.columns:
