@@ -4,6 +4,7 @@
 
 import pandas as pd
 import streamlit as st
+import re
 
 from config import (
     GOOGLE_SHEETS_URL,
@@ -14,16 +15,49 @@ from config import (
 from utils import safe_float
 
 
+def _limpar_numero(valor_str) -> float:
+    """Limpa string numérica e converte para float."""
+    if valor_str is None:
+        return 0.0
+    s = str(valor_str).strip()
+    if s == "" or s.lower() in ("nan", "none", "-", "n/a"):
+        return 0.0
+    # Remove símbolos de moeda e espaços
+    s = re.sub(r"[R$\$€£¥\s]", "", s)
+    # Trata formato brasileiro: 1.234,56 -> 1234.56
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    # Remove %
+    s = s.replace("%", "")
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 @st.cache_data(ttl=CACHE_TTL_PLANILHA)
 def carregar_planilha() -> pd.DataFrame:
     """Carrega dados do Google Sheets."""
     try:
         df = pd.read_csv(GOOGLE_SHEETS_URL)
+
+        # Debug: mostra colunas no console
+        print(f"[DEBUG] Colunas originais: {list(df.columns)}")
+        print(f"[DEBUG] Primeiras linhas:\n{df.head(3)}")
+
+        # Normaliza colunas
         df.columns = [c.strip().lower() for c in df.columns]
 
-        # Renomear colunas
+        # Renomeia colunas
         mapa = {k.lower(): v for k, v in MAPEAMENTO_COLUNAS_GS.items()}
         df = df.rename(columns=mapa)
+
+        print(f"[DEBUG] Colunas após mapeamento: {list(df.columns)}")
 
         # Colunas numéricas
         numericas = [
@@ -33,17 +67,21 @@ def carregar_planilha() -> pd.DataFrame:
         ]
         for col in numericas:
             if col in df.columns:
-                df[col] = pd.to_numeric(
-                    df[col].astype(str)
-                    .str.replace(",", ".", regex=False)
-                    .str.replace("%", "", regex=False)
-                    .str.strip(),
-                    errors="coerce",
-                ).fillna(0)
+                df[col] = df[col].apply(_limpar_numero)
+                print(f"[DEBUG] {col}: {df[col].tolist()}")
 
+        # Remove linhas onde ticker é vazio
+        if "ticker" in df.columns:
+            df = df[df["ticker"].notna()]
+            df = df[df["ticker"].astype(str).str.strip() != ""]
+
+        print(f"[DEBUG] Total linhas carregadas: {len(df)}")
         return df
+
     except Exception as e:
         st.error(f"❌ Erro ao carregar planilha: {e}")
+        import traceback
+        print(f"[ERROR] {traceback.format_exc()}")
         return pd.DataFrame()
 
 
@@ -55,7 +93,7 @@ def separar_carteiras(df: pd.DataFrame):
     if "ticker" not in df.columns:
         return df, pd.DataFrame()
 
-    mask_eric = df["ticker"].astype(str).str.upper() == TICKER_ERICSSON.upper()
+    mask_eric = df["ticker"].astype(str).str.upper().str.strip() == TICKER_ERICSSON.upper()
     df_ericsson  = df[mask_eric].copy().reset_index(drop=True)
     df_principal = df[~mask_eric].copy().reset_index(drop=True)
 
@@ -70,25 +108,25 @@ def enriquecer_dados(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    # Preço atual
+    # Pre?o atual - usa planilha (já em USD)
     if "preco_atual_planilha" in df.columns:
-        df["preco_atual"] = df["preco_atual_planilha"]
+        df["preco_atual"] = df["preco_atual_planilha"].apply(safe_float)
     elif "pm_usd" in df.columns:
-        df["preco_atual"] = df["pm_usd"]
+        df["preco_atual"] = df["pm_usd"].apply(safe_float)
     else:
         df["preco_atual"] = 0.0
 
-    # Valor atual
+    # Valor atual - usa planilha (já em USD)
     if "valor_total_planilha" in df.columns:
-        df["valor_atual"] = df["valor_total_planilha"]
+        df["valor_atual"] = df["valor_total_planilha"].apply(safe_float)
     elif "qtd" in df.columns and "preco_atual" in df.columns:
-        df["valor_atual"] = df["qtd"] * df["preco_atual"]
+        df["valor_atual"] = df["qtd"].apply(safe_float) * df["preco_atual"].apply(safe_float)
     else:
         df["valor_atual"] = 0.0
 
     # Custo total
     if "qtd" in df.columns and "pm_usd" in df.columns:
-        df["custo_total"] = df["qtd"] * df["pm_usd"]
+        df["custo_total"] = df["qtd"].apply(safe_float) * df["pm_usd"].apply(safe_float)
     else:
         df["custo_total"] = df["valor_atual"].copy()
 
@@ -100,18 +138,18 @@ def enriquecer_dados(df: pd.DataFrame) -> pd.DataFrame:
         axis=1,
     )
 
-    # Renda mensal
+    # Renda mensal (div_anual já em USD na planilha)
     if "div_anual" in df.columns and "qtd" in df.columns:
-        df["renda_mensal"] = df["qtd"] * df["div_anual"] / 12
+        df["renda_mensal"] = df["qtd"].apply(safe_float) * df["div_anual"].apply(safe_float) / 12
     else:
         df["renda_mensal"] = 0.0
 
     # YoC
     if "yoc_planilha" in df.columns:
-        df["yoc"] = df["yoc_planilha"]
+        df["yoc"] = df["yoc_planilha"].apply(safe_float)
     elif "div_anual" in df.columns and "pm_usd" in df.columns:
         df["yoc"] = df.apply(
-            lambda r: (r["div_anual"] / r["pm_usd"] * 100)
+            lambda r: (safe_float(r["div_anual"]) / safe_float(r["pm_usd"]) * 100)
             if safe_float(r.get("pm_usd", 0)) > 0 else 0,
             axis=1,
         )
@@ -121,7 +159,7 @@ def enriquecer_dados(df: pd.DataFrame) -> pd.DataFrame:
     # DY atual
     if "div_anual" in df.columns and "preco_atual" in df.columns:
         df["dy_atual"] = df.apply(
-            lambda r: (r["div_anual"] / r["preco_atual"] * 100)
+            lambda r: (safe_float(r["div_anual"]) / safe_float(r["preco_atual"]) * 100)
             if safe_float(r.get("preco_atual", 0)) > 0 else 0,
             axis=1,
         )
@@ -131,7 +169,7 @@ def enriquecer_dados(df: pd.DataFrame) -> pd.DataFrame:
     # Peso %
     total = df["valor_atual"].sum()
     df["peso_pct"] = df["valor_atual"].apply(
-        lambda v: (v / total * 100) if total > 0 else 0
+        lambda v: (safe_float(v) / total * 100) if total > 0 else 0
     )
 
     return df
